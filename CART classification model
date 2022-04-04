@@ -1,0 +1,85 @@
+// Add Burned Area polygon
+var shp = ee.FeatureCollection(polygon)
+Map.addLayer (shp, {}, "Greenwood")
+
+// Function to mask clouds using the Sentinel-2 QA band
+function maskS2clouds(image) {
+  var qa = image.select('QA60');
+
+// Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+// Both flags should be set to zero, indicating clear conditions.
+  var mask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+
+  return image.updateMask(mask).divide(10000);
+}
+
+//add Sentinel-2 image
+var YoF = ee.ImageCollection('COPERNICUS/S2_SR')
+                  .filterDate('2021-07-15','2021-10-01')
+                  // Pre-filter to get less cloudy granules
+                  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE',20))
+                  .map(maskS2clouds)
+                  .filterBounds(shp)
+                  .mosaic()
+                  
+//center our study area polygon
+Map.centerObject(shp, 11);
+
+//dispaly false-color image
+// Map.addLayer(YoF, visualization);
+
+//create Regions of interest
+
+//train point and grop them into a single dataset
+var training = forest.merge(non_forest).merge(water).merge(burned_area);
+
+var label = 'Class';
+var bands = ['B2', 'B3', 'B8'];
+var input = YoF.select(bands);
+
+//train points from our Sentinel-2 Image False-color
+var trainImage = input.sampleRegions({
+  collection: training,
+  properties: [label],
+  scale: 30
+});
+
+//create and separate trining dataset from validation
+var trainingData = trainImage.randomColumn();
+var trainSet = trainingData.filter(ee.Filter.lessThan('random', 0.8));
+var testSet = trainingData.filter(ee.Filter.greaterThanOrEquals('random', 0.8));
+
+//runCART classification model
+var classifier = ee.Classifier.smileCart().train(trainSet, label, bands);
+
+//applying model to based on our Sentinel-2 image
+var classified = input.classify(classifier);
+
+var LCpalette = [
+  '98ff00', //forest (0)
+  'a48f10', //non_forest (1)
+  '0b4a8b', //water(2)
+  '671700', //burned_area (3)
+  ];
+  
+  //diplay and clip our classification from our study area polygon
+  Map.addLayer(classified.clip(shp), {palette: LCpalette, min: 0, max: 3}, 'CART clasification model');
+  
+  //measure burned area km2
+  var burnedArea = shp.geometry().area()
+  var burnedAreaSqKm = ee.Number(burnedArea).divide(1e6).round()
+  print(burnedAreaSqKm)
+  
+  //run a confusion matrix and a Overall Accuracy
+  var trainAccuracy = ee.ConfusionMatrix(testSet.classify(classifier)
+  .errorMatrix({
+    actual: 'Class',
+    predicted: 'classification'
+  }));
+
+print('Error matrix: ', trainAccuracy);
+print('Trainingoverall accuracy: ', trainAccuracy.accuracy());
