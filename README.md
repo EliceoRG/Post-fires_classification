@@ -9,3 +9,7 @@ Script will work for:
   - Accuracy assesment
   - Confusion Matrix 
   - Measure area Km2
+
+
+
+![image](https://user-images.githubusercontent.com/90733943/161648940-54809676-8e65-48bf-b4a8-d9dabd1f3791.png)
